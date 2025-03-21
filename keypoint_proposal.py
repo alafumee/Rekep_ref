@@ -22,7 +22,7 @@ class KeypointProposer:
         torch.manual_seed(self.config['seed'])
         torch.cuda.manual_seed(self.config['seed'])
 
-    def get_keypoints(self, rgb, points, masks):
+    def get_keypoints(self, rgb, points, masks, extra_keypoints_pixel=None):
         # preprocessing
         # breakpoint()
         transformed_rgb, rgb, points, masks, shape_info = self._preprocess(rgb, points, masks)
@@ -46,6 +46,10 @@ class KeypointProposer:
         candidate_pixels = candidate_pixels[sort_idx]
         candidate_rigid_group_ids = candidate_rigid_group_ids[sort_idx]
         # project keypoints to image space
+        if extra_keypoints_pixel is not None:
+            # extra_keypoints_pixel = extra_keypoints_pixel.cpu().numpy()
+            candidate_pixels = np.concatenate((candidate_pixels, extra_keypoints_pixel), axis=0)
+            candidate_keypoints = np.concatenate((candidate_keypoints, points[extra_keypoints_pixel]), axis=0)
         projected = self._project_keypoints_to_img(rgb, candidate_pixels, candidate_rigid_group_ids, masks, features_flat)
         return candidate_keypoints, projected
 

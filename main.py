@@ -21,6 +21,7 @@ from utils import (
     get_callable_grasping_cost_fn,
     print_opt_debug_dict,
 )
+from image_features.correspond import correspond_batch
 
 class Main:
     def __init__(self, scene_file, visualize=False):
@@ -70,6 +71,31 @@ class Main:
                 self.visualizer.show_img(projected_img)
             metadata = {'init_keypoint_positions': keypoints, 'num_keypoints': len(keypoints)}
             rekep_program_dir = self.constraint_generator.generate(projected_img, instruction, metadata)
+            print(f'{bcolors.HEADER}Constraints generated{bcolors.ENDC}')
+        # ====================================
+        # = execute
+        # ====================================
+        self._execute(rekep_program_dir, disturbance_seq)
+        
+    def perform_task_with_reference(self, instruction, ref_constraints, keypoint_img, ref_keypoints_flat, rekep_program_dir=None, disturbance_seq=None):
+        self.env.reset()
+        cam_obs = self.env.get_cam_obs()
+        rgb = cam_obs[self.config['vlm_camera']]['rgb']
+        points = cam_obs[self.config['vlm_camera']]['points']
+        mask = cam_obs[self.config['vlm_camera']]['seg']
+        # ====================================
+        # = keypoint proposal and constraint generation
+        # ====================================
+        if rekep_program_dir is None:
+            correspond_keypoints_pixel, _ = correspond_batch(source_img=keypoint_img,
+                                                             target_img=rgb,
+                                                             source_xys=ref_keypoints_flat,)
+            keypoints, projected_img = self.keypoint_proposer.get_keypoints(rgb, points, mask, extra_keypoints_pixel=correspond_keypoints_pixel)
+            print(f'{bcolors.HEADER}Got {len(keypoints)} proposed keypoints{bcolors.ENDC}')
+            if self.visualize:
+                self.visualizer.show_img(projected_img)
+            metadata = {'init_keypoint_positions': keypoints, 'num_keypoints': len(keypoints)}
+            rekep_program_dir = self.constraint_generator.generate_with_reference(projected_img, instruction, metadata, ref_constraints)
             print(f'{bcolors.HEADER}Constraints generated{bcolors.ENDC}')
         # ====================================
         # = execute
@@ -377,6 +403,9 @@ if __name__ == "__main__":
     scene_file = task['scene_file']
     instruction = task['instruction']
     main = Main(scene_file, visualize=args.visualize)
-    main.perform_task(instruction,
-                    rekep_program_dir=task['rekep_program_dir'] if args.use_cached_query else None,
-                    disturbance_seq=task.get('disturbance_seq', None) if args.apply_disturbance else None)
+    # main.perform_task(instruction,
+    #                 rekep_program_dir=task['rekep_program_dir'] if args.use_cached_query else None,
+    #                 disturbance_seq=task.get('disturbance_seq', None) if args.apply_disturbance else None)
+    main.perform_task_with_reference(instruction, ref_constraints, keypoint_img, ref_keypoints_flat,
+                                     rekep_program_dir=task['rekep_program_dir'] if args.use_cached_query else None,
+                                     disturbance_seq=task.get('disturbance_seq', None) if args.apply_disturbance else None)

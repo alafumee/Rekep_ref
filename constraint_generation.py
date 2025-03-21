@@ -156,3 +156,43 @@ class ConstraintGenerator:
         metadata.update(self._parse_other_metadata(output))
         self._save_metadata(metadata)
         return self.task_dir
+    
+    def generate_with_reference(self, img, instruction, metadata, reference):
+        """
+        Args:
+            img (np.ndarray): image of the scene (H, W, 3) uint8
+            instruction (str): instruction for the query
+        Returns:
+            save_dir (str): directory where the constraints
+        """
+        # create a directory for the task
+        fname = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "_" + instruction.lower().replace(" ", "_")
+        self.task_dir = os.path.join(self.base_dir, fname)
+        os.makedirs(self.task_dir, exist_ok=True)
+        # save query image
+        image_path = os.path.join(self.task_dir, 'query_img.png')
+        cv2.imwrite(image_path, img[..., ::-1])
+        # build prompt
+        messages = self._build_prompt(image_path, instruction)
+        # stream back the response
+        stream = self.client.chat.completions.create(model=self.config['model'],
+                                                        messages=messages,
+                                                        temperature=self.config['temperature'],
+                                                        max_tokens=self.config['max_tokens'],
+                                                        stream=True)
+        output = ""
+        start = time.time()
+        for chunk in stream:
+            print(f'[{time.time()-start:.2f}s] Querying OpenAI API...', end='\r')
+            if chunk.choices[0].delta.content is not None:
+                output += chunk.choices[0].delta.content
+        print(f'[{time.time()-start:.2f}s] Querying OpenAI API...Done')
+        # save raw output
+        with open(os.path.join(self.task_dir, 'output_raw.txt'), 'w') as f:
+            f.write(output)
+        # parse and save constraints
+        self._parse_and_save_constraints(output, self.task_dir)
+        # save metadata
+        metadata.update(self._parse_other_metadata(output))
+        self._save_metadata(metadata)
+        return self.task_dir
