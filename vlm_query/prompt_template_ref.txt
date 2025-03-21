@@ -106,10 +106,6 @@ release_keypoints = [?, ..., ?]
 ```
 
 ## Reference
-Reference Image:
 Reference Plan: "{ref_plan}"
 Reference Constraint Descriptions: "{ref_constraints}"
-
-## Query
-Query Task: "{instruction}"
-Query Image:
+Reference Image: 

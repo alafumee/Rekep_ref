@@ -25,6 +25,9 @@ class ConstraintGenerator:
         self.base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), './vlm_query')
         with open(os.path.join(self.base_dir, 'prompt_template.txt'), 'r') as f:
             self.prompt_template = f.read()
+            
+        with open(os.path.join(self.base_dir, 'prompt_template_ref.txt'), 'r') as f:
+            self.prompt_template_ref = f.read()
 
     def _build_prompt(self, image_path, instruction):
         img_base64 = encode_image(image_path)
@@ -40,6 +43,42 @@ class ConstraintGenerator:
                         "type": "text",
                         "text": self.prompt_template.format(instruction=instruction)
                     },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{img_base64}"
+                        }
+                    },
+                ]
+            }
+        ]
+        return messages
+    
+    def _build_prompt_ref(self, image_path, keypoint_img_path, ref_plan, ref_constraints):
+        img_base64 = encode_image(image_path)
+        keypoint_img_base64 = encode_image(keypoint_img_path)
+        prompt_text = self.prompt_template_ref.format(ref_plan=ref_plan, ref_constraints=ref_constraints)
+        # save prompt
+        with open(os.path.join(self.task_dir, 'prompt.txt'), 'w') as f:
+            f.write(prompt_text)
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": prompt_text
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{keypoint_img_base64}"
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": "\n ## Query \n Query Image:"
+                        },
                     {
                         "type": "image_url",
                         "image_url": {
@@ -164,7 +203,7 @@ class ConstraintGenerator:
         self._save_metadata(metadata)
         return self.task_dir
     
-    def generate_with_reference(self, img, instruction, metadata, reference):
+    def generate_with_reference(self, img, instruction, metadata, reference_file):
         """
         Args:
             img (np.ndarray): image of the scene (H, W, 3) uint8
@@ -180,19 +219,22 @@ class ConstraintGenerator:
         image_path = os.path.join(self.task_dir, 'query_img.png')
         cv2.imwrite(image_path, img[..., ::-1])
         # build prompt
-        messages = self._build_prompt(image_path, instruction)
+        # load reference plan
+        with open(reference_file, 'r') as f:
+            reference_dict = json.load(f)
+        keypoint_image_path = reference_dict['Keypoint_Image_Path']
+        ref_plan = reference_dict['Plan']
+        ref_constraints = reference_dict['Constraints']
+        messages = self._build_prompt_ref(image_path, instruction)
         # stream back the response
-        stream = self.client.chat.completions.create(model=self.config['model'],
+        result = self.client.chat.completions.create(model=self.config['model'],
                                                         messages=messages,
                                                         temperature=self.config['temperature'],
-                                                        max_tokens=self.config['max_tokens'],
-                                                        stream=True)
+                                                        max_tokens=self.config['max_tokens'],)
+                                                        # stream=True)
         output = ""
         start = time.time()
-        for chunk in stream:
-            print(f'[{time.time()-start:.2f}s] Querying OpenAI API...', end='\r')
-            if chunk.choices[0].delta.content is not None:
-                output += chunk.choices[0].delta.content
+        output = result.choices[0].message.content
         print(f'[{time.time()-start:.2f}s] Querying OpenAI API...Done')
         # save raw output
         with open(os.path.join(self.task_dir, 'output_raw.txt'), 'w') as f:

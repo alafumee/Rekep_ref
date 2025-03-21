@@ -3,6 +3,7 @@ import numpy as np
 import json
 import os
 import argparse
+from PIL import Image
 from environment import ReKepOGEnv
 from keypoint_proposal import KeypointProposer
 from constraint_generation import ConstraintGenerator
@@ -390,7 +391,11 @@ if __name__ == "__main__":
         while True:
             yield disturbance(counter)
             counter += 1
-
+            
+if __name__ == "__main__":
+    
+    reference_file = '/root/Rekep/rekep_ready/output.json'
+    
     task_list = {
         'pen': {
             'scene_file': './configs/og_scene_file_red_pen.json',
@@ -406,6 +411,17 @@ if __name__ == "__main__":
     # main.perform_task(instruction,
     #                 rekep_program_dir=task['rekep_program_dir'] if args.use_cached_query else None,
     #                 disturbance_seq=task.get('disturbance_seq', None) if args.apply_disturbance else None)
+    with open(reference_file, 'r') as f:
+            reference_dict = json.load(f)
+    keypoint_image_path = reference_dict['Keypoint_Image_Path']
+    # load image as Image.Image
+    keypoint_img = Image.open(keypoint_image_path)
+    ref_plan = reference_dict['Plan']
+    ref_constraints = reference_dict['Constraints']
+    ref_keypoints_flat = reference_dict['Keypoints']
     main.perform_task_with_reference(instruction, ref_constraints, keypoint_img, ref_keypoints_flat,
                                      rekep_program_dir=task['rekep_program_dir'] if args.use_cached_query else None,
                                      disturbance_seq=task.get('disturbance_seq', None) if args.apply_disturbance else None)
+    main.perform_task(instruction,
+                        rekep_program_dir=task['rekep_program_dir'] if args.use_cached_query else None,
+                        disturbance_seq=task.get('disturbance_seq', None) if args.apply_disturbance else None)
