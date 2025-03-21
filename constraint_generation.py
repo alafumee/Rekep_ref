@@ -1,5 +1,5 @@
 import base64
-from openai import OpenAI
+from openai import OpenAI, AzureOpenAI
 import os
 import cv2
 import json
@@ -16,7 +16,12 @@ def encode_image(image_path):
 class ConstraintGenerator:
     def __init__(self, config):
         self.config = config
-        self.client = OpenAI(api_key=os.environ['OPENAI_API_KEY'], base_url="https://api.chatanywhere.tech/v1")
+        # self.client = OpenAI(api_key=os.environ['OPENAI_API_KEY'], base_url="https://api.chatanywhere.tech/v1")
+        self.client = AzureOpenAI(
+            api_key=os.environ['OPENAI_API_KEY_4O'],
+            azure_endpoint="https://ai-xuhuazhe6145ai854228526556.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2025-01-01-preview",
+            api_version="2025-01-01-preview",
+        )
         self.base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), './vlm_query')
         with open(os.path.join(self.base_dir, 'prompt_template.txt'), 'r') as f:
             self.prompt_template = f.read()
@@ -134,18 +139,20 @@ class ConstraintGenerator:
         cv2.imwrite(image_path, img[..., ::-1])
         # build prompt
         messages = self._build_prompt(image_path, instruction)
-        # stream back the response
-        stream = self.client.chat.completions.create(model=self.config['model'],
+        # fetch the response
+        result = self.client.chat.completions.create(model=self.config['model'],
                                                         messages=messages,
                                                         temperature=self.config['temperature'],
-                                                        max_tokens=self.config['max_tokens'],
-                                                        stream=True)
+                                                        max_tokens=self.config['max_tokens'],)
+                                                        # stream=True)
         output = ""
         start = time.time()
-        for chunk in stream:
-            print(f'[{time.time()-start:.2f}s] Querying OpenAI API...', end='\r')
-            if chunk.choices[0].delta.content is not None:
-                output += chunk.choices[0].delta.content
+        # for chunk in stream:
+        #     print(chunk.choices)
+        #     print(f'[{time.time()-start:.2f}s] Querying OpenAI API...', end='\r')
+        #     if chunk.choices[0].delta.content is not None:
+        #         output += chunk.choices[0].delta.content
+        output = result.choices[0].message.content
         print(f'[{time.time()-start:.2f}s] Querying OpenAI API...Done')
         # save raw output
         with open(os.path.join(self.task_dir, 'output_raw.txt'), 'w') as f:
