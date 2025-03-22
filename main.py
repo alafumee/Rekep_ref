@@ -78,25 +78,29 @@ class Main:
         # ====================================
         self._execute(rekep_program_dir, disturbance_seq)
         
-    def perform_task_with_reference(self, instruction, ref_constraints, keypoint_img, ref_keypoints_flat, rekep_program_dir=None, disturbance_seq=None):
+    def perform_task_with_reference(self, instruction, reference_file, keypoint_img, ref_keypoints_flat, rekep_program_dir=None, disturbance_seq=None):
         self.env.reset()
         cam_obs = self.env.get_cam_obs()
         rgb = cam_obs[self.config['vlm_camera']]['rgb']
         points = cam_obs[self.config['vlm_camera']]['points']
         mask = cam_obs[self.config['vlm_camera']]['seg']
+        
         # ====================================
         # = keypoint proposal and constraint generation
         # ====================================
         if rekep_program_dir is None:
+            # convert rgb to Image
+            rgb_img = Image.fromarray(rgb.cpu().numpy())
             correspond_keypoints_pixel, _ = correspond_batch(source_img=keypoint_img,
-                                                             target_img=rgb,
+                                                             target_img=rgb_img,
                                                              source_xys=ref_keypoints_flat,)
+            correspond_keypoints_pixel = np.array(correspond_keypoints_pixel)
             keypoints, projected_img = self.keypoint_proposer.get_keypoints(rgb, points, mask, extra_keypoints_pixel=correspond_keypoints_pixel)
             print(f'{bcolors.HEADER}Got {len(keypoints)} proposed keypoints{bcolors.ENDC}')
             if self.visualize:
                 self.visualizer.show_img(projected_img)
             metadata = {'init_keypoint_positions': keypoints, 'num_keypoints': len(keypoints)}
-            rekep_program_dir = self.constraint_generator.generate_with_reference(projected_img, instruction, metadata, ref_constraints)
+            rekep_program_dir = self.constraint_generator.generate_with_reference(projected_img, instruction, metadata, reference_file)
             print(f'{bcolors.HEADER}Constraints generated{bcolors.ENDC}')
         # ====================================
         # = execute
@@ -416,12 +420,10 @@ if __name__ == "__main__":
     keypoint_image_path = reference_dict['Keypoint_Image_Path']
     # load image as Image.Image
     keypoint_img = Image.open(keypoint_image_path)
-    ref_plan = reference_dict['Plan']
-    ref_constraints = reference_dict['Constraints']
     ref_keypoints_flat = reference_dict['Keypoints']
-    main.perform_task_with_reference(instruction, ref_constraints, keypoint_img, ref_keypoints_flat,
+    main.perform_task_with_reference(instruction, reference_file, keypoint_img, ref_keypoints_flat,
                                      rekep_program_dir=task['rekep_program_dir'] if args.use_cached_query else None,
                                      disturbance_seq=task.get('disturbance_seq', None) if args.apply_disturbance else None)
-    main.perform_task(instruction,
-                        rekep_program_dir=task['rekep_program_dir'] if args.use_cached_query else None,
-                        disturbance_seq=task.get('disturbance_seq', None) if args.apply_disturbance else None)
+    # main.perform_task(instruction,
+    #                     rekep_program_dir=task['rekep_program_dir'] if args.use_cached_query else None,
+    #                     disturbance_seq=task.get('disturbance_seq', None) if args.apply_disturbance else None)

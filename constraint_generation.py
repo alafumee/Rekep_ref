@@ -212,7 +212,7 @@ class ConstraintGenerator:
             save_dir (str): directory where the constraints
         """
         # create a directory for the task
-        fname = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "_" + instruction.lower().replace(" ", "_")
+        fname = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "_" + instruction.lower().replace(" ", "_") + "_Ref"
         self.task_dir = os.path.join(self.base_dir, fname)
         os.makedirs(self.task_dir, exist_ok=True)
         # save query image
@@ -225,7 +225,7 @@ class ConstraintGenerator:
         keypoint_image_path = reference_dict['Keypoint_Image_Path']
         ref_plan = reference_dict['Plan']
         ref_constraints = reference_dict['Constraints']
-        messages = self._build_prompt_ref(image_path, instruction)
+        messages = self._build_prompt_ref(image_path, keypoint_image_path, ref_plan, ref_constraints)
         # stream back the response
         result = self.client.chat.completions.create(model=self.config['model'],
                                                         messages=messages,

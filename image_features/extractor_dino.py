@@ -69,8 +69,8 @@ class ViTExtractor:
         if 'v2' in model_type:
             ## load from cache
             # model = torch.load('/home/yunzhe/.cache/torch/hub/facebookresearch_dinov2_main')
-            # model = torch.hub.load('facebookresearch/dinov2', model_type)
-            model = torch.hub.load('/home/yunzhe/.cache/torch/hub/facebookresearch_dinov2_main', model_type,source='local')
+            model = torch.hub.load('facebookresearch/dinov2', model_type)
+            # model = torch.hub.load('~/.cache/torch/hub/facebookresearch_dinov2_main', model_type,source='local')
         elif 'dino' in model_type:
             model = torch.hub.load('facebookresearch/dino:main', model_type)
         else:  # model from timm -- load weights from timm to dino model (enables working on arbitrary size image_scene).
