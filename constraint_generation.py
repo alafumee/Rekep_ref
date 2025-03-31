@@ -12,6 +12,7 @@ from datetime import datetime
 def encode_image(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
+os.environ['OPENAI_API_KEY_4O'] = "5v5kVyGKFS1rXVbN50gSY3S1KsTPPWLlvtwNU2T8ZqtBlZzFNFHSJQQJ99BBACi0881XJ3w3AAAAACOG1VvH"
 
 class ConstraintGenerator:
     def __init__(self, config):
@@ -25,7 +26,7 @@ class ConstraintGenerator:
         self.base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), './vlm_query')
         with open(os.path.join(self.base_dir, 'prompt_template.txt'), 'r') as f:
             self.prompt_template = f.read()
-            
+
         with open(os.path.join(self.base_dir, 'prompt_template_ref.txt'), 'r') as f:
             self.prompt_template_ref = f.read()
 
@@ -53,7 +54,7 @@ class ConstraintGenerator:
             }
         ]
         return messages
-    
+
     def _build_prompt_ref(self, image_path, keypoint_img_path, ref_plan, ref_constraints):
         img_base64 = encode_image(image_path)
         keypoint_img_base64 = encode_image(keypoint_img_path)
@@ -115,7 +116,7 @@ class ConstraintGenerator:
                 for name in groupings[key]:
                     f.write("\n".join(functions[name]) + "\n\n")
         print(f"Constraints saved to {save_dir}")
-    
+
     def _parse_other_metadata(self, output):
         data_dict = dict()
         # find num_stages
@@ -135,7 +136,7 @@ class ConstraintGenerator:
                 break
         if grasp_keypoints is None:
             raise ValueError("grasp_keypoints not found in output")
-        # convert into list of ints 
+        # convert into list of ints
         grasp_keypoints = grasp_keypoints['grasp_keypoints'].replace("[", "").replace("]", "").split(",")
         grasp_keypoints = [int(x.strip()) for x in grasp_keypoints]
         data_dict['grasp_keypoints'] = grasp_keypoints
@@ -202,7 +203,7 @@ class ConstraintGenerator:
         metadata.update(self._parse_other_metadata(output))
         self._save_metadata(metadata)
         return self.task_dir
-    
+
     def generate_with_reference(self, img, instruction, metadata, reference_file):
         """
         Args:
