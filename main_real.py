@@ -7,7 +7,7 @@ from PIL import Image
 from environment import ReKepOGEnv
 from keypoint_proposal import KeypointProposer
 from constraint_generation import ConstraintGenerator
-from ik_solver import IKSolver
+from ik_solver import IKSolver, PolyFrankaIKSolver
 from subgoal_solver import SubgoalSolver
 from path_solver import PathSolver
 from visualizer import Visualizer
