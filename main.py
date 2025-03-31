@@ -177,6 +177,7 @@ class Main:
         # main loop
         self.last_sim_step_counter = -np.inf
         self._update_stage(1)
+        image_count = 0
         while True:
             scene_keypoints = self.env.get_keypoint_positions()
             self.keypoints = np.concatenate([[self.env.get_ee_pos()], scene_keypoints], axis=0)  # first keypoint is always the ee
@@ -195,6 +196,20 @@ class Main:
                     if violation > self.config['constraint_tolerance']:
                         backtrack = True
                         break
+
+            image = self.env.get_cam_obs()
+
+            save_path = os.path.join(rekep_program_dir, f"image_cache0_{image_count}.png")
+            import cv2
+            # import pdb; pdb.set_trace()
+
+            cv2.imwrite(save_path,image[0]['rgb'].detach().cpu().numpy())
+            save_path = os.path.join(rekep_program_dir, f"image_cache1_{image_count}.png")
+            cv2.imwrite(save_path,image[1]['rgb'].detach().cpu().numpy())
+
+            image_count = image_count + 1
+
+
             if backtrack:
                 # determine which stage to backtrack to based on constraints
                 for new_stage in range(self.stage - 1, 0, -1):
