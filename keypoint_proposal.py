@@ -47,21 +47,26 @@ class KeypointProposer:
         candidate_rigid_group_ids = candidate_rigid_group_ids[sort_idx]
         # project keypoints to image space
         if extra_keypoints_pixel is not None:
+            print("*candidate_pixels.shape", candidate_pixels.shape)
+            print("***extra_keypoints_pixel.shape", extra_keypoints_pixel.shape)
             # extra_keypoints_pixel = extra_keypoints_pixel.cpu().numpy()
+            # correct the xy order of extra_keypoints_pixel
+            extra_keypoints_pixel = np.array([[pt[1], pt[0]] for pt in extra_keypoints_pixel])
             candidate_pixels = np.concatenate((candidate_pixels, extra_keypoints_pixel), axis=0)
-            candidate_keypoints = np.concatenate((candidate_keypoints, points[extra_keypoints_pixel]), axis=0)
-        projected = self._project_keypoints_to_img(rgb, candidate_pixels, candidate_rigid_group_ids, masks, features_flat)
+            extra_keypoints = np.array([points[coord[0], coord[1]] for coord in extra_keypoints_pixel])
+            candidate_keypoints = np.concatenate((candidate_keypoints, extra_keypoints), axis=0)
+        projected = self._project_keypoints_to_img(rgb, candidate_pixels, candidate_rigid_group_ids, masks, features_flat, rotate=True)
         return candidate_keypoints, projected
 
     def _preprocess(self, rgb, points, masks):
         if masks.is_cuda:
             masks = masks.cpu()
             # print("***masks", masks)
-            
+
         rgb = rgb.cpu()  # move to CPU if on GPU
-        rgb = rgb.numpy() 
+        rgb = rgb.numpy()
         # print("***rgb", rgb)
-            
+
         # convert masks to binary masks
         masks = [masks == uid for uid in np.unique(masks.numpy())]
         # print("***masks2", masks)
@@ -82,17 +87,43 @@ class KeypointProposer:
             'patch_w': patch_w,
         }
         return transformed_rgb, rgb, points, masks, shape_info
-    
-    def _project_keypoints_to_img(self, rgb, candidate_pixels, candidate_rigid_group_ids, masks, features_flat):
+
+    def _project_keypoints_to_img(self, rgb, candidate_pixels, candidate_rigid_group_ids, masks, features_flat, rotate=False):
+        if rotate:
+            rgb = cv2.rotate(rgb, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            # 旋转candidate_pixels
+            candidate_pixels = np.array([[pixel[1], rgb.shape[0] - 1 - pixel[0]] for pixel in candidate_pixels])
+
+            candidate_rigid_group_ids = np.array([rigid_group_id for rigid_group_id in candidate_rigid_group_ids])
+
         projected = rgb.copy()
         # overlay keypoints on the image
+
+        # if two close keypoints have the same rigid group id, only draw one
+        selected_keypoints = []
+
         for keypoint_count, pixel in enumerate(candidate_pixels):
+            # check if selected_keypoints are too close
+            import pdb; pdb.set_trace()
+            if len(selected_keypoints) > 0:
+                distances = np.linalg.norm(selected_keypoints - pixel, axis=-1)
+                if np.min(distances) < 20:
+                    continue
+            selected_keypoints.append(pixel)
+        print("***selected_keypoints", selected_keypoints)
+        print(f"{len(selected_keypoints)} keypoints after removing close ones")
+        for keypoint_count, pixel in enumerate(candidate_pixels):
+            print("***pixel", pixel)
+            if not any((pixel == x).all() for x in selected_keypoints):
+                continue
+
             displayed_text = f"{keypoint_count}"
             text_length = len(displayed_text)
             # draw a box
             box_width = 30 + 10 * (text_length - 1)
             box_height = 30
-            cv2.rectangle(projected, (pixel[1] - box_width // 2, pixel[0] - box_height // 2), (pixel[1] + box_width // 2, pixel[0] + box_height // 2), (255, 255, 255), -1)
+            # 不要白色的部分
+            # cv2.rectangle(projected, (pixel[1] - box_width // 2, pixel[0] - box_height // 2), (pixel[1] + box_width // 2, pixel[0] + box_height // 2), (255, 255, 255), -1)
             cv2.rectangle(projected, (pixel[1] - box_width // 2, pixel[0] - box_height // 2), (pixel[1] + box_width // 2, pixel[0] + box_height // 2), (0, 0, 0), 2)
             # draw text
             org = (pixel[1] - 7 * (text_length), pixel[0] + 7)
@@ -147,6 +178,16 @@ class KeypointProposer:
             feature_points_torch  = (feature_points_torch - feature_points_torch.min(0)[0]) / (feature_points_torch.max(0)[0] - feature_points_torch.min(0)[0])
             X = torch.cat([X, feature_points_torch], dim=-1)
             # cluster features to get meaningful regions
+            ## 判断 X 里面是不是有nan
+            if torch.isnan(X).any():
+                continue
+            # import matplotlib.pyplot as plt
+
+            # # 可视化并保存这个物体的mask
+            # plt.imshow(binary_mask, cmap='gray')
+            # plt.title(f'Rigid Group ID: {rigid_group_id}')
+            # plt.savefig(f'mask_visualization_rigid_group_{rigid_group_id}.png')
+            # plt.close()
             cluster_ids_x, cluster_centers = kmeans(
                 X=X,
                 num_clusters=self.config['num_candidates_per_mask'],

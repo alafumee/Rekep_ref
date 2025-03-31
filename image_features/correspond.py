@@ -238,7 +238,8 @@ def correspond_batch(
             plt.savefig(os.path.join(save_dir, f'correspond_result_{source_xy}.png'))
 
         original_correspond_points = [(np.array(tp) * target_img.size[1] / resized_imgs[1].size[1]).astype(int) for tp in target_points]
-        target_points_batch.append(original_correspond_points)
-        heatmaps_batch.append(heatmaps)
+        target_points_batch.extend(original_correspond_points)
+        heatmaps_batch.extend(heatmaps)
 
+    print("target_points_batch: ", target_points_batch)
     return target_points_batch, heatmaps_batch

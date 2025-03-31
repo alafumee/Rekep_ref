@@ -62,6 +62,10 @@ class Main:
         rgb = cam_obs[self.config['vlm_camera']]['rgb']
         points = cam_obs[self.config['vlm_camera']]['points']
         mask = cam_obs[self.config['vlm_camera']]['seg']
+        # save the rgb image
+        # rgb_path = os.path.join(rekep_program_dir, 'initial_rgb.png')
+        # rgb.save(rgb_path)
+        # exit(0)
         # ====================================
         # = keypoint proposal and constraint generation
         # ====================================
@@ -77,26 +81,65 @@ class Main:
         # = execute
         # ====================================
         self._execute(rekep_program_dir, disturbance_seq)
-        
-    def perform_task_with_reference(self, instruction, ref_constraints, keypoint_img, ref_keypoints_flat, rekep_program_dir=None, disturbance_seq=None):
+
+    def perform_task_with_reference(self, instruction, reference_file, keypoint_img, ref_keypoints_flat, rekep_program_dir=None, disturbance_seq=None):
         self.env.reset()
         cam_obs = self.env.get_cam_obs()
         rgb = cam_obs[self.config['vlm_camera']]['rgb']
+
+        # 逆时针旋转90度
+        from PIL import Image
+        import numpy as np
+
+        # Convert the tensor to a numpy array and then to an Image object
+        # rgb_img = Image.fromarray(rgb.cpu().numpy().astype(np.uint8))
+
+        # # 逆时针旋转90度
+        # rgb_img = rgb_img.rotate(90)
+
+        # Convert the Image object back to a numpy array and then to a tensor
+        # rgb = torch.tensor(np.array(rgb_img))
+
         points = cam_obs[self.config['vlm_camera']]['points']
         mask = cam_obs[self.config['vlm_camera']]['seg']
+
+
+        # Convert the tensor to a numpy array and then to an Image object
+        rgb_img = Image.fromarray(rgb.cpu().numpy().astype(np.uint8))
+        #
+
+        # Save the image
+        rgb_path = "vlm_query/initial_rgb.png"
+        rgb_img.save(rgb_path)
+
+        ## save all camera images
+        for i in range(len(cam_obs)):
+            rgb_img = Image.fromarray(cam_obs[i]['rgb'].cpu().numpy().astype(np.uint8))
+            rgb_img.save(f"vlm_query/initial_camera_{i}.png")
+        # exit(0)
+
         # ====================================
         # = keypoint proposal and constraint generation
         # ====================================
         if rekep_program_dir is None:
+            # convert rgb to Image
+            rgb_img = Image.fromarray(rgb.cpu().numpy())
             correspond_keypoints_pixel, _ = correspond_batch(source_img=keypoint_img,
-                                                             target_img=rgb,
+                                                             target_img=rgb_img,
                                                              source_xys=ref_keypoints_flat,)
+            correspond_keypoints_pixel = np.array(correspond_keypoints_pixel)
             keypoints, projected_img = self.keypoint_proposer.get_keypoints(rgb, points, mask, extra_keypoints_pixel=correspond_keypoints_pixel)
             print(f'{bcolors.HEADER}Got {len(keypoints)} proposed keypoints{bcolors.ENDC}')
+
+            ## rotate projected_img 90 degrees
+            # rgb_img = Image.fromarray(projected_img.astype(np.uint8))
+            # rgb_img = rgb_img.rotate(90)
+            # projected_img = np.array(rgb_img)
+
             if self.visualize:
                 self.visualizer.show_img(projected_img)
             metadata = {'init_keypoint_positions': keypoints, 'num_keypoints': len(keypoints)}
-            rekep_program_dir = self.constraint_generator.generate_with_reference(projected_img, instruction, metadata, ref_constraints)
+            rekep_program_dir = self.constraint_generator.generate_with_reference(projected_img, instruction, metadata, reference_file)
             print(f'{bcolors.HEADER}Constraints generated{bcolors.ENDC}')
         # ====================================
         # = execute
@@ -126,7 +169,7 @@ class Main:
                 get_grasping_cost_fn = get_callable_grasping_cost_fn(self.env)  # special grasping function for VLM to call
                 stage_dict[constraint_type] = load_functions_from_txt(load_path, get_grasping_cost_fn) if os.path.exists(load_path) else []
             self.constraint_fns[stage] = stage_dict
-        
+
         # bookkeeping of which keypoints can be moved in the optimization
         self.keypoint_movable_mask = np.zeros(self.program_info['num_keypoints'] + 1, dtype=bool)
         self.keypoint_movable_mask[0] = True  # first keypoint is always the ee, so it's movable
@@ -166,7 +209,7 @@ class Main:
                         if violation > self.config['constraint_tolerance']:
                             all_constraints_satisfied = False
                             break
-                    if all_constraints_satisfied:   
+                    if all_constraints_satisfied:
                         break
                 print(f"{bcolors.HEADER}[stage={self.stage}] backtrack to stage {new_stage}{bcolors.ENDC}")
                 self._update_stage(new_stage)
@@ -200,7 +243,7 @@ class Main:
                     elif self.is_release_stage:
                         self._execute_release_action()
                     # if completed, save video and return
-                    if self.stage == self.program_info['num_stages']: 
+                    if self.stage == self.program_info['num_stages']:
                         self.env.sleep(2.0)
                         save_path = self.env.save_video()
                         print(f"{bcolors.OKGREEN}Video saved to {save_path}\n\n{bcolors.ENDC}")
@@ -290,7 +333,7 @@ class Main:
         grasp_pose[:3] += T.quat2mat(pregrasp_pose[3:]) @ np.array([self.config['grasp_depth'], 0, 0])
         grasp_action = np.concatenate([grasp_pose, [self.env.get_gripper_close_action()]])
         self.env.execute_action(grasp_action, precise=True)
-    
+
     def _execute_release_action(self):
         self.env.open_gripper()
 
@@ -335,7 +378,7 @@ if __name__ == "__main__":
         while True:
             yield disturbance(counter)
             counter += 1
-    
+
     def stage2_disturbance_seq(env):
         """
         Take the pen out of the gripper in stage 1 when robot is trying to reorient the pen
@@ -366,7 +409,7 @@ if __name__ == "__main__":
         while True:
             yield disturbance(counter)
             counter += 1
-    
+
     def stage3_disturbance_seq(env):
         """
         Move the holder in stage 2 when robot is trying to drop the pen into the holder
@@ -391,11 +434,11 @@ if __name__ == "__main__":
         while True:
             yield disturbance(counter)
             counter += 1
-            
+
 if __name__ == "__main__":
-    
-    reference_file = '/root/Rekep/rekep_ready/output.json'
-    
+
+    reference_file = '/home/yunzhe/seedo-free/rekep_ready/closedoor3/closedoor3_output.json'
+
     task_list = {
         'pen': {
             'scene_file': './configs/og_scene_file_red_pen.json',
@@ -403,8 +446,14 @@ if __name__ == "__main__":
             'rekep_program_dir': './vlm_query/pen',
             'disturbance_seq': {1: stage1_disturbance_seq, 2: stage2_disturbance_seq, 3: stage3_disturbance_seq},
             },
+        'closedoor3': {
+            'scene_file': './configs/og_scene_file_cabinet.json',
+            'instruction': 'take the white thermos from the cabinet and close the cabinet door with the white thermos',
+            'rekep_program_dir': './vlm_query/closedoor3',
+            'disturbance_seq': None,
+        }
     }
-    task = task_list['pen']
+    task = task_list['closedoor3']
     scene_file = task['scene_file']
     instruction = task['instruction']
     main = Main(scene_file, visualize=args.visualize)
@@ -416,12 +465,10 @@ if __name__ == "__main__":
     keypoint_image_path = reference_dict['Keypoint_Image_Path']
     # load image as Image.Image
     keypoint_img = Image.open(keypoint_image_path)
-    ref_plan = reference_dict['Plan']
-    ref_constraints = reference_dict['Constraints']
     ref_keypoints_flat = reference_dict['Keypoints']
-    # main.perform_task_with_reference(instruction, ref_constraints, keypoint_img, ref_keypoints_flat,
-    #                                  rekep_program_dir=task['rekep_program_dir'] if args.use_cached_query else None,
-    #                                  disturbance_seq=task.get('disturbance_seq', None) if args.apply_disturbance else None)
-    main.perform_task(instruction,
-                        rekep_program_dir=task['rekep_program_dir'] if args.use_cached_query else None,
-                        disturbance_seq=task.get('disturbance_seq', None) if args.apply_disturbance else None)
+    main.perform_task_with_reference(instruction, reference_file, keypoint_img, ref_keypoints_flat,
+                                     rekep_program_dir=task['rekep_program_dir'] if args.use_cached_query else None,
+                                     disturbance_seq=task.get('disturbance_seq', None) if args.apply_disturbance else None)
+    # main.perform_task(instruction,
+    #                     rekep_program_dir=task['rekep_program_dir'] if args.use_cached_query else None,
+    #                     disturbance_seq=task.get('disturbance_seq', None) if args.apply_disturbance else None)
