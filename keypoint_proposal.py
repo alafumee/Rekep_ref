@@ -55,7 +55,7 @@ class KeypointProposer:
             candidate_pixels = np.concatenate((candidate_pixels, extra_keypoints_pixel), axis=0)
             extra_keypoints = np.array([points[coord[0], coord[1]] for coord in extra_keypoints_pixel])
             candidate_keypoints = np.concatenate((candidate_keypoints, extra_keypoints), axis=0)
-        projected = self._project_keypoints_to_img(rgb, candidate_pixels, candidate_rigid_group_ids, masks, features_flat, rotate=True)
+        projected = self._project_keypoints_to_img(rgb, candidate_pixels, candidate_rigid_group_ids, masks, features_flat, rotate=False)
         return candidate_keypoints, projected
 
     def _preprocess(self, rgb, points, masks):
@@ -90,10 +90,10 @@ class KeypointProposer:
 
     def _project_keypoints_to_img(self, rgb, candidate_pixels, candidate_rigid_group_ids, masks, features_flat, rotate=False):
         if rotate:
+            # import pdb; pdb.set_trace()
             rgb = cv2.rotate(rgb, cv2.ROTATE_90_COUNTERCLOCKWISE)
-            # 旋转candidate_pixels
-            candidate_pixels = np.array([[pixel[1], rgb.shape[0] - 1 - pixel[0]] for pixel in candidate_pixels])
-
+            # 旋转candidate_pixels 90 counterclockwise
+            candidate_pixels = np.array([[rgb.shape[1] - 1 - pixel[1], pixel[0]] for pixel in candidate_pixels])
             candidate_rigid_group_ids = np.array([rigid_group_id for rigid_group_id in candidate_rigid_group_ids])
 
         projected = rgb.copy()
@@ -104,7 +104,7 @@ class KeypointProposer:
 
         for keypoint_count, pixel in enumerate(candidate_pixels):
             # check if selected_keypoints are too close
-            import pdb; pdb.set_trace()
+            # import pdb; pdb.set_trace()
             if len(selected_keypoints) > 0:
                 distances = np.linalg.norm(selected_keypoints - pixel, axis=-1)
                 if np.min(distances) < 20:
