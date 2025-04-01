@@ -143,7 +143,7 @@ class ReKepOGEnv:
         for cam_id in self.cams:
             self.last_cam_obs[cam_id] = self.cams[cam_id].get_obs()  # each containing rgb, depth, points, seg
         return self.last_cam_obs
-    
+
     def register_keypoints(self, keypoints):
         """
         Args:
@@ -174,7 +174,7 @@ class ReKepOGEnv:
                         world_pose_w_scale = PoseAPI.get_world_pose_with_scale(mesh.prim_path)
                         trimesh_object.apply_transform(world_pose_w_scale)
                         points_transformed = trimesh_object.sample(1000)
-                        
+
                         # find closest point
                         dists = np.linalg.norm(points_transformed - keypoint, axis=1)
                         point = points_transformed[np.argmin(dists)]
@@ -264,7 +264,7 @@ class ReKepOGEnv:
         self.robot.reset()
         for _ in range(5): self._step()
         self.open_gripper()
-        # moving arm to the side to unblock view 
+        # moving arm to the side to unblock view
         ee_pose = self.get_ee_pose()
         ee_pose[:3] += np.array([0.0, -0.2, -0.1])
         action = np.concatenate([ee_pose, [self.get_gripper_null_action()]])
@@ -276,16 +276,24 @@ class ReKepOGEnv:
         return self.robot.is_grasping(candidate_obj=candidate_obj) == IsGraspingState.TRUE
 
     def get_ee_pose(self):
-        ee_pos, ee_xyzw = (self.robot.get_eef_position(), self.robot.get_eef_orientation())
-        ee_pose = np.concatenate([ee_pos, ee_xyzw])  # [7]
+        """获取末端执行器的位姿"""
+        ee_pos, ee_quat = self.robot.get_ee_pose()
+        # 转换为numpy数组并合并成单一的7维向量
+        ee_pos = ee_pos.numpy() if torch.is_tensor(ee_pos) else ee_pos
+        ee_quat = ee_quat.numpy() if torch.is_tensor(ee_quat) else ee_quat
+        ee_pose = np.concatenate([ee_pos, ee_quat])  # [7]
         return ee_pose
 
     def get_ee_pos(self):
-        return self.get_ee_pose()[:3]
+        """获取末端执行器位置"""
+        ee_pos, _ = self.robot.get_ee_pose()
+        return ee_pos.numpy() if torch.is_tensor(ee_pos) else ee_pos
 
     def get_ee_quat(self):
-        return self.get_ee_pose()[3:]
-    
+        """获取末端执行器方向的四元数表示"""
+        _, ee_quat = self.robot.get_ee_pose()
+        return ee_quat.numpy() if torch.is_tensor(ee_quat) else ee_quat
+
     def get_arm_joint_postions(self):
         assert isinstance(self.robot, Fetch), "The IK solver assumes the robot is a Fetch robot"
         arm = self.robot.default_arm
@@ -294,45 +302,48 @@ class ReKepOGEnv:
         return arm_joint_pos
 
     def close_gripper(self):
+        """关闭夹爪
+        现实机器人使用GripperInterface而不是OG接口
         """
-        Exposed interface: 1.0 for closed, -1.0 for open, 0.0 for no change
-        Internal OG interface: 1.0 for open, 0.0 for closed
-        """
-        if self.last_og_gripper_action == 0.0:
+        if hasattr(self, 'last_og_gripper_action') and self.last_og_gripper_action == 0.0:
             return
-        action = np.zeros(12)
-        action[10:] = [0, 0]  # gripper: float. 0. for closed, 1. for open.
-        for _ in range(30):
-            self._step(action)
+        # 根据Franka夹爪参数调整速度和力
+        self.gripper.grasp(speed=0.1, force=20.0, grasp_width=0.0)
         self.last_og_gripper_action = 0.0
 
     def open_gripper(self):
-        if self.last_og_gripper_action == 1.0:
+        """打开夹爪
+        现实机器人使用GripperInterface而不是OG接口
+        """
+        if hasattr(self, 'last_og_gripper_action') and self.last_og_gripper_action == 1.0:
             return
-        action = np.zeros(12)
-        action[10:] = [1, 1]  # gripper: float. 0. for closed, 1. for open.
-        for _ in range(30):
-            self._step(action)
+        # 参数可能需要根据实际夹爪调整
+        self.gripper.goto(width=0.08, speed=0.1, force=20.0)
         self.last_og_gripper_action = 1.0
 
     def get_last_og_gripper_action(self):
         return self.last_og_gripper_action
-    
+
     def get_gripper_open_action(self):
         return -1.0
-    
+
     def get_gripper_close_action(self):
         return 1.0
-    
+
     def get_gripper_null_action(self):
         return 0.0
-    
+
     def compute_target_delta_ee(self, target_pose):
+        """计算当前末端执行器位姿与目标位姿之间的差距"""
         target_pos, target_xyzw = target_pose[:3], target_pose[3:]
-        ee_pose = self.get_ee_pose()
-        ee_pos, ee_xyzw = ee_pose[:3], ee_pose[3:]
-        pos_diff = np.linalg.norm(ee_pos - target_pos)
-        rot_diff = angle_between_quats(ee_xyzw, target_xyzw)
+
+        current_pos, current_quat = self.robot.get_ee_pose()
+        current_pos = current_pos.numpy() if torch.is_tensor(current_pos) else current_pos
+        current_quat = current_quat.numpy() if torch.is_tensor(current_quat) else current_quat
+
+        pos_diff = np.linalg.norm(current_pos - target_pos)
+        rot_diff = angle_between_quats(current_quat, target_xyzw)
+
         return pos_diff, rot_diff
 
     def execute_action(
@@ -394,7 +405,7 @@ class ReKepOGEnv:
                 self._move_to_waypoint(pose, intermediate_pos_threshold, intermediate_rot_threshold)
             # move to the final pose with required precision
             pose = pose_seq[-1]
-            self._move_to_waypoint(pose, pos_threshold, rot_threshold, max_steps=20 if not precise else 40) 
+            self._move_to_waypoint(pose, pos_threshold, rot_threshold, max_steps=20 if not precise else 40)
             # compute error
             pos_error, rot_error = self.compute_target_delta_ee(target_pose)
             self.verbose and print(f'\n{bcolors.BOLD}[environment.py | {get_clock_time()}] Move to pose completed (pos_error: {pos_error}, rot_error: {np.rad2deg(rot_error)}){bcolors.ENDC}\n')
@@ -410,14 +421,13 @@ class ReKepOGEnv:
                 pass
             else:
                 raise ValueError(f"Invalid gripper action: {gripper_action}")
-            
+
             return pos_error, rot_error
-    
+
     def sleep(self, seconds):
-        start = time.time()
-        while time.time() - start < seconds:
-            self._step()
-    
+        """让系统等待指定的秒数"""
+        time.sleep(seconds)
+
     def save_video(self, save_path=None):
         save_dir = os.path.join(os.path.dirname(__file__), 'videos')
         os.makedirs(save_dir, exist_ok=True)
@@ -425,7 +435,7 @@ class ReKepOGEnv:
             save_path = os.path.join(save_dir, f'{datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")}.mp4')
         video_writer = imageio.get_writer(save_path, fps=30)
         for rgb in self.video_cache:
-            # print(type(rgb), rgb.shape) 
+            # print(type(rgb), rgb.shape)
             if not isinstance(rgb, np.ndarray):
                 rgb = np.array(rgb)
             video_writer.append_data(rgb)
@@ -531,12 +541,12 @@ class RealFrankaEnv:
         self.bounds_max = np.array(self.config['bounds_max'])
         self.interpolate_pos_step_size = self.config['interpolate_pos_step_size']
         self.interpolate_rot_step_size = self.config['interpolate_rot_step_size']
-        
+
         self.arm_action_dim = 6
         self.hand_action_dim = 0
         self.num_points = 1024
         self.arm_home = ARM_HOME
-        
+
         #self.force_sensor = UDPReceiver()
         self.action_space = spaces.Box(
             low=-1,
@@ -544,7 +554,7 @@ class RealFrankaEnv:
             shape=(self.arm_action_dim + self.hand_action_dim,),
             dtype=np.float32
         )
-        
+
         self.observation_space = spaces.Dict({
             'image': spaces.Box(
                 low=0,
@@ -552,14 +562,14 @@ class RealFrankaEnv:
                 shape=(3, 84, 84),
                 dtype=np.float32
             ),
-            
+
             'depth': spaces.Box(
                 low=0,
                 high=1,
                 shape=(84, 84),
                 dtype=np.float32
             ),
-            
+
             'agent_pos': spaces.Box(
                 low=-np.inf,
                 high=np.inf,
@@ -582,8 +592,11 @@ class RealFrankaEnv:
         # robot vars
         # self.robot = self.og_env.robots[0]
         self.robot = RobotInterface(ip_address="172.16.0.11")
+
+        self.gripper = GripperInterface(ip_address="172.16.0.11")
+
         self.robot.start_cartesian_impedance()
-        
+
         self.realsense_camera = RealSense_Camera(type=camera, id=CAMERA_ID)
         self.realsense_camera.prepare()
 
@@ -591,6 +604,9 @@ class RealFrankaEnv:
                                   self.robot.arm_control_idx[self.robot.default_arm]])
         self.reset_joint_pos = self.robot.reset_joint_pos[dof_idx]
         self.world2robot_homo = T.pose_inv(T.pose2mat(self.robot.get_position_orientation()))
+
+        # 初始化夹爪状态
+        self.last_gripper_action = 1.0  # 假设初始状态为打开
 
     # ======================================
     # = exposed functions
@@ -653,8 +669,8 @@ class RealFrankaEnv:
 
     def get_point_cloud_with_image(self):
         point_cloud, rgbd_frame = self.realsense_camera.get_frame()
-        return point_cloud, rgbd_frame    
-    
+        return point_cloud, rgbd_frame
+
     def get_cam_obs(self, smooth=False):
         # obs = self.cam.get_obs()
         # ret = {}
@@ -670,17 +686,17 @@ class RealFrankaEnv:
         #print(point_cloud.shape)
         # point_cloud = preprocess_point_cloud(points=point_cloud)
         # visualize_pointcloud(point_cloud)
-        
+
         point_cloud = pcd_crop(point_cloud)
-        
+
         # visualize_pointcloud(point_cloud)
-        
+
         if smooth:
             self.update_arm(self.latest_arm_action)
         point_cloud = pcd_cluster(point_cloud)
-        
+
         # visualize_pointcloud(point_cloud)
-        
+
         rgb = rgbd_frame[:, :, :3]
         depth = rgbd_frame[:, :, -1]
         obs_dict = {
@@ -692,7 +708,7 @@ class RealFrankaEnv:
         if smooth:
             self.update_arm(self.latest_arm_action)
         return obs_dict
-    
+
     def get_robot_state(self):
         state_arm_ee_pos, state_arm_ee_quat = self.robot.get_ee_pose()
         state_arm_ee_pos = state_arm_ee_pos.numpy()
@@ -700,7 +716,7 @@ class RealFrankaEnv:
         state_arm_ee_euler = R.from_quat(state_arm_ee_quat).as_euler('XYZ')
         state_arm_ee = np.concatenate([state_arm_ee_pos, state_arm_ee_euler])
         return state_arm_ee
-    
+
     def register_keypoints(self, keypoints):
         """
         Args:
@@ -731,7 +747,7 @@ class RealFrankaEnv:
         #                 world_pose_w_scale = PoseAPI.get_world_pose_with_scale(mesh.prim_path)
         #                 trimesh_object.apply_transform(world_pose_w_scale)
         #                 points_transformed = trimesh_object.sample(1000)
-                        
+
         #                 # find closest point
         #                 dists = np.linalg.norm(points_transformed - keypoint, axis=1)
         #                 point = points_transformed[np.argmin(dists)]
@@ -780,7 +796,7 @@ class RealFrankaEnv:
         # assert hasattr(self, '_keypoint2object') and self._keypoint2object is not None, "Keypoints have not been registered yet."
         # return self._keypoint2object[keypoint_idx]
         pass
-    
+
 
     def get_collision_points(self, noise=True):
         # not really sure how to do this
@@ -823,33 +839,56 @@ class RealFrankaEnv:
         collision_points = np.concatenate(collision_points, axis=0)
         return collision_points
 
+
     def reset(self):
-        self.og_env.reset()
-        self.robot.reset()
-        for _ in range(5): self._step()
+        """重置机器人到初始位置"""
+        # 回到初始位置
+        arm_home_torch = torch.tensor(self.arm_home)
+        self.robot.go_home(use_mirror=False)
+
+        # 打开夹爪
         self.open_gripper()
-        # moving arm to the side to unblock view 
-        ee_pose = self.get_ee_pose()
-        ee_pose[:3] += np.array([0.0, -0.2, -0.1])
-        action = np.concatenate([ee_pose, [self.get_gripper_null_action()]])
-        self.execute_action(action, precise=True)
+
+        # 清空视频缓存
         self.video_cache = []
+
         print(f'{bcolors.HEADER}Reset done.{bcolors.ENDC}')
+
+    # def reset(self):
+    #     self.og_env.reset()
+    #     self.robot.reset()
+    #     for _ in range(5): self._step()
+    #     self.open_gripper()
+    #     # moving arm to the side to unblock view
+    #     ee_pose = self.get_ee_pose()
+    #     ee_pose[:3] += np.array([0.0, -0.2, -0.1])
+    #     action = np.concatenate([ee_pose, [self.get_gripper_null_action()]])
+    #     self.execute_action(action, precise=True)
+    #     self.video_cache = []
+    #     print(f'{bcolors.HEADER}Reset done.{bcolors.ENDC}')
 
     def is_grasping(self, candidate_obj=None):
         return self.robot.is_grasping(candidate_obj=candidate_obj) == IsGraspingState.TRUE
 
     def get_ee_pose(self):
-        ee_pos, ee_xyzw = (self.robot.get_eef_position(), self.robot.get_eef_orientation())
-        ee_pose = np.concatenate([ee_pos, ee_xyzw])  # [7]
+        """获取末端执行器的位姿"""
+        ee_pos, ee_quat = self.robot.get_ee_pose()
+        # 转换为numpy数组并合并成单一的7维向量
+        ee_pos = ee_pos.numpy() if torch.is_tensor(ee_pos) else ee_pos
+        ee_quat = ee_quat.numpy() if torch.is_tensor(ee_quat) else ee_quat
+        ee_pose = np.concatenate([ee_pos, ee_quat])  # [7]
         return ee_pose
 
     def get_ee_pos(self):
-        return self.get_ee_pose()[:3]
+        """获取末端执行器位置"""
+        ee_pos, _ = self.robot.get_ee_pose()
+        return ee_pos.numpy() if torch.is_tensor(ee_pos) else ee_pos
 
     def get_ee_quat(self):
-        return self.get_ee_pose()[3:]
-    
+        """获取末端执行器方向的四元数表示"""
+        _, ee_quat = self.robot.get_ee_pose()
+        return ee_quat.numpy() if torch.is_tensor(ee_quat) else ee_quat
+
     def get_arm_joint_postions(self):
         assert isinstance(self.robot, Fetch), "The IK solver assumes the robot is a Fetch robot"
         arm = self.robot.default_arm
@@ -858,130 +897,200 @@ class RealFrankaEnv:
         return arm_joint_pos
 
     def close_gripper(self):
+        """关闭夹爪
+        现实机器人使用GripperInterface而不是OG接口
         """
-        Exposed interface: 1.0 for closed, -1.0 for open, 0.0 for no change
-        Internal OG interface: 1.0 for open, 0.0 for closed
-        """
-        if self.last_og_gripper_action == 0.0:
+        if hasattr(self, 'last_gripper_action') and self.last_gripper_action == 0.0:
             return
-        action = np.zeros(12)
-        action[10:] = [0, 0]  # gripper: float. 0. for closed, 1. for open.
-        for _ in range(30):
-            self._step(action)
-        self.last_og_gripper_action = 0.0
+        # 根据Franka夹爪参数调整速度和力
+        self.gripper.grasp(speed=0.1, force=20.0, grasp_width=0.0)
+        self.last_gripper_action = 0.0
 
     def open_gripper(self):
-        if self.last_og_gripper_action == 1.0:
+        """打开夹爪
+        现实机器人使用GripperInterface而不是OG接口
+        """
+        if hasattr(self, 'last_gripper_action') and self.last_gripper_action == 1.0:
             return
-        action = np.zeros(12)
-        action[10:] = [1, 1]  # gripper: float. 0. for closed, 1. for open.
-        for _ in range(30):
-            self._step(action)
-        self.last_og_gripper_action = 1.0
+        # 参数可能需要根据实际夹爪调整
+        self.gripper.goto(width=0.08, speed=0.1, force=20.0)
+        self.last_gripper_action = 1.0
 
     def get_last_og_gripper_action(self):
-        return self.last_og_gripper_action
-    
+        return self.last_gripper_action
+
     def get_gripper_open_action(self):
         return -1.0
-    
+
     def get_gripper_close_action(self):
         return 1.0
-    
+
     def get_gripper_null_action(self):
         return 0.0
-    
+
     def compute_target_delta_ee(self, target_pose):
+        """计算当前末端执行器位姿与目标位姿之间的差距"""
         target_pos, target_xyzw = target_pose[:3], target_pose[3:]
-        ee_pose = self.get_ee_pose()
-        ee_pos, ee_xyzw = ee_pose[:3], ee_pose[3:]
-        pos_diff = np.linalg.norm(ee_pos - target_pos)
-        rot_diff = angle_between_quats(ee_xyzw, target_xyzw)
+
+        current_pos, current_quat = self.robot.get_ee_pose()
+        current_pos = current_pos.numpy() if torch.is_tensor(current_pos) else current_pos
+        current_quat = current_quat.numpy() if torch.is_tensor(current_quat) else current_quat
+
+        pos_diff = np.linalg.norm(current_pos - target_pos)
+        rot_diff = angle_between_quats(current_quat, target_xyzw)
+
         return pos_diff, rot_diff
+    def execute_action(self, action, precise=True):
+        """
+        移动机器人到目标位姿并执行夹爪动作
 
-    def execute_action(
-            self,
-            action,
-            precise=True,
-        ):
-            """
-            Moves the robot gripper to a target pose by specifying the absolute pose in the world frame and executes gripper action.
+        Args:
+            action: [x, y, z, qx, qy, qz, qw, gripper_action]
+            precise: 是否使用精确模式
+        """
+        action = np.array(action).copy()
+        assert action.shape == (8,)
+        target_pose = action[:7]
+        gripper_action = action[7]
 
-            Args:
-                action (x, y, z, qx, qy, qz, qw, gripper_action): absolute target pose in the world frame + gripper action.
-                precise (bool): whether to use small position and rotation thresholds for precise movement (robot would move slower).
-            Returns:
-                tuple: A tuple containing the position and rotation errors after reaching the target pose.
-            """
-            if precise:
-                pos_threshold = 0.03
-                rot_threshold = 3.0
-            else:
-                pos_threshold = 0.10
-                rot_threshold = 5.0
-            action = np.array(action).copy()
-            assert action.shape == (8,)
-            target_pose = action[:7]
-            gripper_action = action[7]
+        # 安全检查：限制工作空间
+        if np.any(target_pose[:3] < self.bounds_min) or np.any(target_pose[:3] > self.bounds_max):
+            print(f'目标位置超出工作空间范围，将位置限制在工作空间内')
+            target_pose[:3] = np.clip(target_pose[:3], self.bounds_min, self.bounds_max)
 
-            # ======================================
-            # = status and safety check
-            # ======================================
-            if np.any(target_pose[:3] < self.bounds_min) \
-                 or np.any(target_pose[:3] > self.bounds_max):
-                print(f'{bcolors.WARNING}[environment.py | {get_clock_time()}] Target position is out of bounds, clipping to workspace bounds{bcolors.ENDC}')
-                target_pose[:3] = np.clip(target_pose[:3], self.bounds_min, self.bounds_max)
+        # 提取位置和方向
+        target_pos = target_pose[:3]
+        target_quat = target_pose[3:7]
 
-            # ======================================
-            # = interpolation
-            # ======================================
-            current_pose = self.get_ee_pose()
-            pos_diff = np.linalg.norm(current_pose[:3] - target_pose[:3])
-            rot_diff = angle_between_quats(current_pose[3:7], target_pose[3:7])
-            pos_is_close = pos_diff < self.interpolate_pos_step_size
-            rot_is_close = rot_diff < self.interpolate_rot_step_size
-            if pos_is_close and rot_is_close:
-                self.verbose and print(f'{bcolors.WARNING}[environment.py | {get_clock_time()}] Skipping interpolation{bcolors.ENDC}')
-                pose_seq = np.array([target_pose])
-            else:
-                num_steps = get_linear_interpolation_steps(current_pose, target_pose, self.interpolate_pos_step_size, self.interpolate_rot_step_size)
-                pose_seq = linear_interpolate_poses(current_pose, target_pose, num_steps)
-                self.verbose and print(f'{bcolors.WARNING}[environment.py | {get_clock_time()}] Interpolating for {num_steps} steps{bcolors.ENDC}')
+        # 设置控制参数
+        if precise:
+            time_to_go = 3.0  # 精确模式下移动更慢
+        else:
+            time_to_go = 1.0
 
-            # ======================================
-            # = move to target pose
-            # ======================================
-            # move faster for intermediate poses
-            intermediate_pos_threshold = 0.10
-            intermediate_rot_threshold = 5.0
-            for pose in pose_seq[:-1]:
-                self._move_to_waypoint(pose, intermediate_pos_threshold, intermediate_rot_threshold)
-            # move to the final pose with required precision
-            pose = pose_seq[-1]
-            self._move_to_waypoint(pose, pos_threshold, rot_threshold, max_steps=20 if not precise else 40) 
-            # compute error
-            pos_error, rot_error = self.compute_target_delta_ee(target_pose)
-            self.verbose and print(f'\n{bcolors.BOLD}[environment.py | {get_clock_time()}] Move to pose completed (pos_error: {pos_error}, rot_error: {np.rad2deg(rot_error)}){bcolors.ENDC}\n')
+        # 移动到目标位姿
+        current_pos, current_quat = self.robot.get_ee_pose()
+        current_pos = current_pos.numpy() if torch.is_tensor(current_pos) else current_pos
+        current_quat = current_quat.numpy() if torch.is_tensor(current_quat) else current_quat
 
-            # ======================================
-            # = apply gripper action
-            # ======================================
-            if gripper_action == self.get_gripper_open_action():
-                self.open_gripper()
-            elif gripper_action == self.get_gripper_close_action():
-                self.close_gripper()
-            elif gripper_action == self.get_gripper_null_action():
-                pass
-            else:
-                raise ValueError(f"Invalid gripper action: {gripper_action}")
-            
-            return pos_error, rot_error
-    
+        # 计算移动前的误差
+        pos_diff_before = np.linalg.norm(current_pos - target_pos)
+        rot_diff_before = angle_between_quats(current_quat, target_quat)
+
+        # 使用RobotInterface的move_to_ee_pose
+        target_pos_torch = torch.tensor(target_pos)
+        target_quat_torch = torch.tensor(target_quat)
+
+        # 移动机器人
+        self.robot.move_to_ee_pose(
+            position=target_pos_torch,
+            orientation=target_quat_torch,
+            time_to_go=time_to_go,
+            delta=False
+        )
+
+        # 计算移动后的误差
+        current_pos, current_quat = self.robot.get_ee_pose()
+        current_pos = current_pos.numpy() if torch.is_tensor(current_pos) else current_pos
+        current_quat = current_quat.numpy() if torch.is_tensor(current_quat) else current_quat
+
+        pos_error = np.linalg.norm(current_pos - target_pos)
+        rot_error = angle_between_quats(current_quat, target_quat)
+
+        # 执行夹爪动作
+        if gripper_action == self.get_gripper_open_action():
+            self.open_gripper()
+        elif gripper_action == self.get_gripper_close_action():
+            self.close_gripper()
+        elif gripper_action == self.get_gripper_null_action():
+            pass
+        else:
+            raise ValueError(f"无效的夹爪动作: {gripper_action}")
+        return pos_error, rot_error
+
+    # def execute_action(
+    #         self,
+    #         action,
+    #         precise=True,
+    #     ):
+    #         """
+    #         Moves the robot gripper to a target pose by specifying the absolute pose in the world frame and executes gripper action.
+
+    #         Args:
+    #             action (x, y, z, qx, qy, qz, qw, gripper_action): absolute target pose in the world frame + gripper action.
+    #             precise (bool): whether to use small position and rotation thresholds for precise movement (robot would move slower).
+    #         Returns:
+    #             tuple: A tuple containing the position and rotation errors after reaching the target pose.
+    #         """
+    #         if precise:
+    #             pos_threshold = 0.03
+    #             rot_threshold = 3.0
+    #         else:
+    #             pos_threshold = 0.10
+    #             rot_threshold = 5.0
+    #         action = np.array(action).copy()
+    #         assert action.shape == (8,)
+    #         target_pose = action[:7]
+    #         gripper_action = action[7]
+
+    #         # ======================================
+    #         # = status and safety check
+    #         # ======================================
+    #         if np.any(target_pose[:3] < self.bounds_min) \
+    #              or np.any(target_pose[:3] > self.bounds_max):
+    #             print(f'{bcolors.WARNING}[environment.py | {get_clock_time()}] Target position is out of bounds, clipping to workspace bounds{bcolors.ENDC}')
+    #             target_pose[:3] = np.clip(target_pose[:3], self.bounds_min, self.bounds_max)
+
+    #         # ======================================
+    #         # = interpolation
+    #         # ======================================
+    #         current_pose = self.get_ee_pose()
+    #         pos_diff = np.linalg.norm(current_pose[:3] - target_pose[:3])
+    #         rot_diff = angle_between_quats(current_pose[3:7], target_pose[3:7])
+    #         pos_is_close = pos_diff < self.interpolate_pos_step_size
+    #         rot_is_close = rot_diff < self.interpolate_rot_step_size
+    #         if pos_is_close and rot_is_close:
+    #             self.verbose and print(f'{bcolors.WARNING}[environment.py | {get_clock_time()}] Skipping interpolation{bcolors.ENDC}')
+    #             pose_seq = np.array([target_pose])
+    #         else:
+    #             num_steps = get_linear_interpolation_steps(current_pose, target_pose, self.interpolate_pos_step_size, self.interpolate_rot_step_size)
+    #             pose_seq = linear_interpolate_poses(current_pose, target_pose, num_steps)
+    #             self.verbose and print(f'{bcolors.WARNING}[environment.py | {get_clock_time()}] Interpolating for {num_steps} steps{bcolors.ENDC}')
+
+    #         # ======================================
+    #         # = move to target pose
+    #         # ======================================
+    #         # move faster for intermediate poses
+    #         intermediate_pos_threshold = 0.10
+    #         intermediate_rot_threshold = 5.0
+    #         for pose in pose_seq[:-1]:
+    #             self._move_to_waypoint(pose, intermediate_pos_threshold, intermediate_rot_threshold)
+    #         # move to the final pose with required precision
+    #         pose = pose_seq[-1]
+    #         self._move_to_waypoint(pose, pos_threshold, rot_threshold, max_steps=20 if not precise else 40)
+    #         # compute error
+    #         pos_error, rot_error = self.compute_target_delta_ee(target_pose)
+    #         self.verbose and print(f'\n{bcolors.BOLD}[environment.py | {get_clock_time()}] Move to pose completed (pos_error: {pos_error}, rot_error: {np.rad2deg(rot_error)}){bcolors.ENDC}\n')
+
+    #         # ======================================
+    #         # = apply gripper action
+    #         # ======================================
+    #         if gripper_action == self.get_gripper_open_action():
+    #             self.open_gripper()
+    #         elif gripper_action == self.get_gripper_close_action():
+    #             self.close_gripper()
+    #         elif gripper_action == self.get_gripper_null_action():
+    #             pass
+    #         else:
+    #             raise ValueError(f"Invalid gripper action: {gripper_action}")
+
+    #         return pos_error, rot_error
+
     def sleep(self, seconds):
         start = time.time()
         while time.time() - start < seconds:
             self._step()
-    
+
     def save_video(self, save_path=None):
         save_dir = os.path.join(os.path.dirname(__file__), 'videos')
         os.makedirs(save_dir, exist_ok=True)
@@ -989,7 +1098,7 @@ class RealFrankaEnv:
             save_path = os.path.join(save_dir, f'{datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")}.mp4')
         video_writer = imageio.get_writer(save_path, fps=30)
         for rgb in self.video_cache:
-            # print(type(rgb), rgb.shape) 
+            # print(type(rgb), rgb.shape)
             if not isinstance(rgb, np.ndarray):
                 rgb = np.array(rgb)
             video_writer.append_data(rgb)
@@ -1044,7 +1153,7 @@ class RealFrankaEnv:
             action = np.zeros(12)  # first 3 are base, which we don't use
             action[4:7] = relative_position
             action[7:10] = T.quat2axisangle(relative_quat)
-            action[10:] = [self.last_og_gripper_action, self.last_og_gripper_action]
+            action[10:] = [self.last_gripper_action, self.last_gripper_action]
             # step the action
             _ = self._step(action=action)
             count += 1
