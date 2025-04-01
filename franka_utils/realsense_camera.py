@@ -8,7 +8,7 @@ import cv2
 import pyrealsense2 as rs
 # import visualizer
 # vis = visualizer.Visualizer()
-from utils.camera_utils import CameraInfo, create_point_cloud_from_depth_image, transform_point_cloud
+from franka_utils.camera_utils import CameraInfo, create_point_cloud_from_depth_image, transform_point_cloud
 
 # PIXEL_W, PIXEL_H = 640, 480 # default
 DEPTH_PIXEL_W, DEPTH_PIXEL_H = 640, 480 #320, 240

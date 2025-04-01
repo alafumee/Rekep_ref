@@ -748,7 +748,7 @@ class RealFrankaEnv:
         pass
 
     def get_keypoint_positions(self):
-        # Use D3Fields for this
+        # Use cotracker for this
         """
         Args:
             None
